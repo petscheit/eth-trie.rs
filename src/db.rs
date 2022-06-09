@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use hashbrown::{HashMap};
 use std::error::Error;
-use std::sync::Arc;
+use sp_std::sync::Arc;
 
 use parking_lot::RwLock;
 
@@ -12,39 +12,10 @@ use crate::errors::MemDBError;
 pub trait DB: Send + Sync {
     type Error: Error;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>; // need
 
     /// Insert data into the cache.
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error>;
-
-    /// Remove data with given key.
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error>;
-
-    /// Insert a batch of data into the cache.
-    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
-        for i in 0..keys.len() {
-            let key = &keys[i];
-            let value = values[i].clone();
-            self.insert(key, value)?;
-        }
-        Ok(())
-    }
-
-    /// Remove a batch of data into the cache.
-    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
-        for key in keys {
-            self.remove(key)?;
-        }
-        Ok(())
-    }
-
-    /// Flush data to the DB from the cache.
-    fn flush(&self) -> Result<(), Self::Error>;
-
-    #[cfg(test)]
-    fn len(&self) -> Result<usize, Self::Error>;
-    #[cfg(test)]
-    fn is_empty(&self) -> Result<bool, Self::Error>;
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error>; // need
 }
 
 #[derive(Default, Debug)]
@@ -78,26 +49,6 @@ impl DB for MemoryDB {
         self.storage.write().insert(key.to_vec(), value);
         Ok(())
     }
-
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
-        if self.light {
-            self.storage.write().remove(key);
-        }
-        Ok(())
-    }
-
-    fn flush(&self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.storage.try_read().unwrap().len())
-    }
-    #[cfg(test)]
-    fn is_empty(&self) -> Result<bool, Self::Error> {
-        Ok(self.storage.try_read().unwrap().is_empty())
-    }
 }
 
 #[cfg(test)]
@@ -113,13 +64,4 @@ mod tests {
         assert_eq!(v, b"test-value")
     }
 
-    #[test]
-    fn test_memdb_remove() {
-        let memdb = MemoryDB::new(true);
-        memdb.insert(b"test", b"test".to_vec()).unwrap();
-
-        memdb.remove(b"test").unwrap();
-        let contains = memdb.get(b"test").unwrap();
-        assert_eq!(contains, None)
-    }
 }

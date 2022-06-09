@@ -35,15 +35,6 @@ where
 
     db: Arc<D>,
 
-    // The batch of pending new nodes to write
-    cache: HashMap<Vec<u8>, Vec<u8>>,
-    passing_keys: HashSet<Vec<u8>>,
-    gen_keys: HashSet<Vec<u8>>,
-}
-
-enum EncodedNode {
-    Hash(H256),
-    Inline(Vec<u8>),
 }
 
 #[derive(Clone, Debug)]
@@ -202,10 +193,7 @@ where
             root: Node::Empty,
             root_hash: keccak(&rlp::NULL_RLP.to_vec()),
 
-            cache: HashMap::new(),
-            passing_keys: HashSet::new(),
-            gen_keys: HashSet::new(),
-
+        
             db,
         }
     }
@@ -214,10 +202,6 @@ where
         Self {
             root: Node::from_hash(root_hash),
             root_hash,
-
-            cache: HashMap::new(),
-            passing_keys: HashSet::new(),
-            gen_keys: HashSet::new(),
 
             db: self.db.clone(),
         }
