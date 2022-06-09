@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use sp_std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 

@@ -1,8 +1,7 @@
-use std::sync::{Arc, RwLock};
+use sp_std::sync::{Arc, RwLock};
 
 use hashbrown::{HashMap, HashSet};
 use keccak_hash::{keccak, H256};
-use log::warn;
 use rlp::{Prototype, Rlp, RlpStream};
 
 use crate::db::{MemoryDB, DB};
@@ -14,31 +13,8 @@ pub type TrieResult<T> = Result<T, TrieError>;
 const HASHED_LENGTH: usize = 32;
 
 pub trait Trie<D: DB> {
-    /// Returns the value for key stored in the trie.
+     /// Returns the value for key stored in the trie.
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>>;
-
-    /// Checks that the key is present in the trie
-    fn contains(&self, key: &[u8]) -> TrieResult<bool>;
-
-    /// Inserts value into trie and modifies it if it exists
-    fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()>;
-
-    /// Removes any existing value for key from the trie.
-    fn remove(&mut self, key: &[u8]) -> TrieResult<bool>;
-
-    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
-    /// Returns the root hash of the trie.
-    fn root_hash(&mut self) -> TrieResult<H256>;
-
-    /// Prove constructs a merkle proof for key. The result contains all encoded nodes
-    /// on the path to the value at key. The value itself is also included in the last
-    /// node and can be retrieved by verifying the proof.
-    ///
-    /// If the trie does not contain a value for key, the returned proof contains all
-    /// nodes of the longest existing prefix of the key (at least the root node), ending
-    /// with the node that proves the absence of the key.
-    // TODO refactor encode_raw() so that it doesn't need a &mut self
-    fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>>;
 
     /// return value if key exists, None if key not exist, Error if proof is wrong
     fn verify_proof(
@@ -176,7 +152,7 @@ where
                             match n {
                                 Some(node) => self.nodes.push(node.into()),
                                 None => {
-                                    warn!("Trie node with hash {:?} is missing from the database. Skipping...", &node_hash);
+                                    println!("Trie node with hash {:?} is missing from the database. Skipping...", &node_hash);
                                     continue;
                                 }
                             }
@@ -213,7 +189,7 @@ impl<D> EthTrie<D>
 where
     D: DB,
 {
-    pub fn iter(&self) -> TrieIterator<D> {
+    pub fn iter(&self) -> TrieIterator<D> { // need
         let nodes = vec![(self.root.clone()).into()];
         TrieIterator {
             trie: self,
@@ -221,7 +197,7 @@ where
             nodes,
         }
     }
-    pub fn new(db: Arc<D>) -> Self {
+    pub fn new(db: Arc<D>) -> Self { // need 
         Self {
             root: Node::Empty,
             root_hash: keccak(&rlp::NULL_RLP.to_vec()),
@@ -234,7 +210,7 @@ where
         }
     }
 
-    pub fn at_root(&self, root_hash: H256) -> Self {
+    pub fn at_root(&self, root_hash: H256) -> Self { // need
         Self {
             root: Node::from_hash(root_hash),
             root_hash,
@@ -274,110 +250,6 @@ where
         }
     }
 
-    /// Checks that the key is present in the trie
-    fn contains(&self, key: &[u8]) -> TrieResult<bool> {
-        let path = &Nibbles::from_raw(key, true);
-        Ok(self.get_at(&self.root, path, 0)?.map_or(false, |_| true))
-    }
-
-    /// Inserts value into trie and modifies it if it exists
-    fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
-        if value.is_empty() {
-            self.remove(key)?;
-            return Ok(());
-        }
-        let root = self.root.clone();
-        let path = &Nibbles::from_raw(key, true);
-        let result = self.insert_at(root, path, 0, value.to_vec());
-
-        if let Err(TrieError::MissingTrieNode {
-            node_hash,
-            traversed,
-            root_hash,
-            err_key: _,
-        }) = result
-        {
-            Err(TrieError::MissingTrieNode {
-                node_hash,
-                traversed,
-                root_hash,
-                err_key: Some(key.to_vec()),
-            })
-        } else {
-            self.root = result?;
-            Ok(())
-        }
-    }
-
-    /// Removes any existing value for key from the trie.
-    fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
-        let path = &Nibbles::from_raw(key, true);
-        let result = self.delete_at(&self.root.clone(), path, 0);
-
-        if let Err(TrieError::MissingTrieNode {
-            node_hash,
-            traversed,
-            root_hash,
-            err_key: _,
-        }) = result
-        {
-            Err(TrieError::MissingTrieNode {
-                node_hash,
-                traversed,
-                root_hash,
-                err_key: Some(key.to_vec()),
-            })
-        } else {
-            let (n, removed) = result?;
-            self.root = n;
-            Ok(removed)
-        }
-    }
-
-    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
-    /// Returns the root hash of the trie.
-    fn root_hash(&mut self) -> TrieResult<H256> {
-        self.commit()
-    }
-
-    /// Prove constructs a merkle proof for key. The result contains all encoded nodes
-    /// on the path to the value at key. The value itself is also included in the last
-    /// node and can be retrieved by verifying the proof.
-    ///
-    /// If the trie does not contain a value for key, the returned proof contains all
-    /// nodes of the longest existing prefix of the key (at least the root node), ending
-    /// with the node that proves the absence of the key.
-    fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
-        let key_path = &Nibbles::from_raw(key, true);
-        let result = self.get_path_at(&self.root, key_path, 0);
-
-        if let Err(TrieError::MissingTrieNode {
-            node_hash,
-            traversed,
-            root_hash,
-            err_key: _,
-        }) = result
-        {
-            Err(TrieError::MissingTrieNode {
-                node_hash,
-                traversed,
-                root_hash,
-                err_key: Some(key.to_vec()),
-            })
-        } else {
-            let mut path = result?;
-            match self.root {
-                Node::Empty => {}
-                _ => path.push(self.root.clone()),
-            }
-            Ok(path
-                .into_iter()
-                .rev()
-                .map(|n| self.encode_raw(&n))
-                .collect())
-        }
-    }
-
     /// return value if key exists, None if key not exist, Error if proof is wrong
     fn verify_proof(
         &self,
@@ -402,7 +274,7 @@ impl<D> EthTrie<D>
 where
     D: DB,
 {
-    fn get_at(
+    fn get_at( // need
         &self,
         source_node: &Node,
         path: &Nibbles,
@@ -454,414 +326,6 @@ where
         }
     }
 
-    fn insert_at(
-        &mut self,
-        n: Node,
-        path: &Nibbles,
-        path_index: usize,
-        value: Vec<u8>,
-    ) -> TrieResult<Node> {
-        let partial = path.offset(path_index);
-        match n {
-            Node::Empty => Ok(Node::from_leaf(partial, value)),
-            Node::Leaf(leaf) => {
-                let old_partial = &leaf.key;
-                let match_index = partial.common_prefix(old_partial);
-                if match_index == old_partial.len() {
-                    return Ok(Node::from_leaf(leaf.key.clone(), value));
-                }
-
-                let mut branch = BranchNode {
-                    children: empty_children(),
-                    value: None,
-                };
-
-                let n = Node::from_leaf(old_partial.offset(match_index + 1), leaf.value.clone());
-                branch.insert(old_partial.at(match_index), n);
-
-                let n = Node::from_leaf(partial.offset(match_index + 1), value);
-                branch.insert(partial.at(match_index), n);
-
-                if match_index == 0 {
-                    return Ok(Node::Branch(Arc::new(RwLock::new(branch))));
-                }
-
-                // if include a common prefix
-                Ok(Node::from_extension(
-                    partial.slice(0, match_index),
-                    Node::Branch(Arc::new(RwLock::new(branch))),
-                ))
-            }
-            Node::Branch(branch) => {
-                let mut borrow_branch = branch.write().unwrap();
-
-                if partial.at(0) == 0x10 {
-                    borrow_branch.value = Some(value);
-                    return Ok(Node::Branch(branch.clone()));
-                }
-
-                let child = borrow_branch.children[partial.at(0)].clone();
-                let new_child = self.insert_at(child, path, path_index + 1, value)?;
-                borrow_branch.children[partial.at(0)] = new_child;
-                Ok(Node::Branch(branch.clone()))
-            }
-            Node::Extension(ext) => {
-                let mut borrow_ext = ext.write().unwrap();
-
-                let prefix = &borrow_ext.prefix;
-                let sub_node = borrow_ext.node.clone();
-                let match_index = partial.common_prefix(prefix);
-
-                if match_index == 0 {
-                    let mut branch = BranchNode {
-                        children: empty_children(),
-                        value: None,
-                    };
-                    branch.insert(
-                        prefix.at(0),
-                        if prefix.len() == 1 {
-                            sub_node
-                        } else {
-                            Node::from_extension(prefix.offset(1), sub_node)
-                        },
-                    );
-                    let node = Node::Branch(Arc::new(RwLock::new(branch)));
-
-                    return self.insert_at(node, path, path_index, value);
-                }
-
-                if match_index == prefix.len() {
-                    let new_node =
-                        self.insert_at(sub_node, path, path_index + match_index, value)?;
-                    return Ok(Node::from_extension(prefix.clone(), new_node));
-                }
-
-                let new_ext = Node::from_extension(prefix.offset(match_index), sub_node);
-                let new_node = self.insert_at(new_ext, path, path_index + match_index, value)?;
-                borrow_ext.prefix = prefix.slice(0, match_index);
-                borrow_ext.node = new_node;
-                Ok(Node::Extension(ext.clone()))
-            }
-            Node::Hash(hash_node) => {
-                let node_hash = hash_node.hash;
-                self.passing_keys.insert(node_hash.as_bytes().to_vec());
-                let node =
-                    self.recover_from_db(node_hash)?
-                        .ok_or_else(|| TrieError::MissingTrieNode {
-                            node_hash,
-                            traversed: Some(path.slice(0, path_index)),
-                            root_hash: Some(self.root_hash),
-                            err_key: None,
-                        })?;
-                self.insert_at(node, path, path_index, value)
-            }
-        }
-    }
-
-    fn delete_at(
-        &mut self,
-        old_node: &Node,
-        path: &Nibbles,
-        path_index: usize,
-    ) -> TrieResult<(Node, bool)> {
-        let partial = &path.offset(path_index);
-        let (new_node, deleted) = match old_node {
-            Node::Empty => Ok((Node::Empty, false)),
-            Node::Leaf(leaf) => {
-                if &leaf.key == partial {
-                    return Ok((Node::Empty, true));
-                }
-                Ok((Node::Leaf(leaf.clone()), false))
-            }
-            Node::Branch(branch) => {
-                let mut borrow_branch = branch.write().unwrap();
-
-                if partial.at(0) == 0x10 {
-                    borrow_branch.value = None;
-                    return Ok((Node::Branch(branch.clone()), true));
-                }
-
-                let index = partial.at(0);
-                let child = &borrow_branch.children[index];
-
-                let (new_child, deleted) = self.delete_at(child, path, path_index + 1)?;
-                if deleted {
-                    borrow_branch.children[index] = new_child;
-                }
-
-                Ok((Node::Branch(branch.clone()), deleted))
-            }
-            Node::Extension(ext) => {
-                let mut borrow_ext = ext.write().unwrap();
-
-                let prefix = &borrow_ext.prefix;
-                let match_len = partial.common_prefix(prefix);
-
-                if match_len == prefix.len() {
-                    let (new_node, deleted) =
-                        self.delete_at(&borrow_ext.node, path, path_index + match_len)?;
-
-                    if deleted {
-                        borrow_ext.node = new_node;
-                    }
-
-                    Ok((Node::Extension(ext.clone()), deleted))
-                } else {
-                    Ok((Node::Extension(ext.clone()), false))
-                }
-            }
-            Node::Hash(hash_node) => {
-                let hash = hash_node.hash;
-                self.passing_keys.insert(hash.as_bytes().to_vec());
-
-                let node =
-                    self.recover_from_db(hash)?
-                        .ok_or_else(|| TrieError::MissingTrieNode {
-                            node_hash: hash,
-                            traversed: Some(path.slice(0, path_index)),
-                            root_hash: Some(self.root_hash),
-                            err_key: None,
-                        })?;
-                self.delete_at(&node, path, path_index)
-            }
-        }?;
-
-        if deleted {
-            Ok((self.degenerate(new_node)?, deleted))
-        } else {
-            Ok((new_node, deleted))
-        }
-    }
-
-    // This refactors the trie after a node deletion, as necessary.
-    // For example, if a deletion removes a child of a branch node, leaving only one child left, it
-    // needs to be modified into an extension and maybe combined with its parent and/or child node.
-    fn degenerate(&mut self, n: Node) -> TrieResult<Node> {
-        match n {
-            Node::Branch(branch) => {
-                let borrow_branch = branch.read().unwrap();
-
-                let mut used_indexs = vec![];
-                for (index, node) in borrow_branch.children.iter().enumerate() {
-                    match node {
-                        Node::Empty => continue,
-                        _ => used_indexs.push(index),
-                    }
-                }
-
-                // if only a value node, transmute to leaf.
-                if used_indexs.is_empty() && borrow_branch.value.is_some() {
-                    let key = Nibbles::from_raw(&[], true);
-                    let value = borrow_branch.value.clone().unwrap();
-                    Ok(Node::from_leaf(key, value))
-                // if only one node. make an extension.
-                } else if used_indexs.len() == 1 && borrow_branch.value.is_none() {
-                    let used_index = used_indexs[0];
-                    let n = borrow_branch.children[used_index].clone();
-
-                    let new_node = Node::from_extension(Nibbles::from_hex(&[used_index as u8]), n);
-                    self.degenerate(new_node)
-                } else {
-                    Ok(Node::Branch(branch.clone()))
-                }
-            }
-            Node::Extension(ext) => {
-                let borrow_ext = ext.read().unwrap();
-
-                let prefix = &borrow_ext.prefix;
-                match borrow_ext.node.clone() {
-                    Node::Extension(sub_ext) => {
-                        let borrow_sub_ext = sub_ext.read().unwrap();
-
-                        let new_prefix = prefix.join(&borrow_sub_ext.prefix);
-                        let new_n = Node::from_extension(new_prefix, borrow_sub_ext.node.clone());
-                        self.degenerate(new_n)
-                    }
-                    Node::Leaf(leaf) => {
-                        let new_prefix = prefix.join(&leaf.key);
-                        Ok(Node::from_leaf(new_prefix, leaf.value.clone()))
-                    }
-                    // try again after recovering node from the db.
-                    Node::Hash(hash_node) => {
-                        let node_hash = hash_node.hash;
-                        self.passing_keys.insert(node_hash.as_bytes().to_vec());
-
-                        let new_node =
-                            self.recover_from_db(node_hash)?
-                                .ok_or(TrieError::MissingTrieNode {
-                                    node_hash,
-                                    traversed: None,
-                                    root_hash: Some(self.root_hash),
-                                    err_key: None,
-                                })?;
-
-                        let n = Node::from_extension(borrow_ext.prefix.clone(), new_node);
-                        self.degenerate(n)
-                    }
-                    _ => Ok(Node::Extension(ext.clone())),
-                }
-            }
-            _ => Ok(n),
-        }
-    }
-
-    // Get nodes path along the key, only the nodes whose encode length is greater than
-    // hash length are added.
-    // For embedded nodes whose data are already contained in their parent node, we don't need to
-    // add them in the path.
-    // In the code below, we only add the nodes get by `get_node_from_hash`, because they contains
-    // all data stored in db, including nodes whose encoded data is less than hash length.
-    fn get_path_at(
-        &self,
-        source_node: &Node,
-        path: &Nibbles,
-        path_index: usize,
-    ) -> TrieResult<Vec<Node>> {
-        let partial = &path.offset(path_index);
-        match source_node {
-            Node::Empty | Node::Leaf(_) => Ok(vec![]),
-            Node::Branch(branch) => {
-                let borrow_branch = branch.read().unwrap();
-
-                if partial.is_empty() || partial.at(0) == 16 {
-                    Ok(vec![])
-                } else {
-                    let node = &borrow_branch.children[partial.at(0)];
-                    self.get_path_at(node, path, path_index + 1)
-                }
-            }
-            Node::Extension(ext) => {
-                let borrow_ext = ext.read().unwrap();
-
-                let prefix = &borrow_ext.prefix;
-                let match_len = partial.common_prefix(prefix);
-
-                if match_len == prefix.len() {
-                    self.get_path_at(&borrow_ext.node, path, path_index + match_len)
-                } else {
-                    Ok(vec![])
-                }
-            }
-            Node::Hash(hash_node) => {
-                let node_hash = hash_node.hash;
-                let n = self
-                    .recover_from_db(node_hash)?
-                    .ok_or(TrieError::MissingTrieNode {
-                        node_hash,
-                        traversed: None,
-                        root_hash: Some(self.root_hash),
-                        err_key: None,
-                    })?;
-                let mut rest = self.get_path_at(&n, path, path_index)?;
-                rest.push(n);
-                Ok(rest)
-            }
-        }
-    }
-
-    fn commit(&mut self) -> TrieResult<H256> {
-        let root_hash = match self.write_node(&self.root.clone()) {
-            EncodedNode::Hash(hash) => hash,
-            EncodedNode::Inline(encoded) => {
-                let hash = keccak(&encoded);
-                self.cache.insert(hash.as_bytes().to_vec(), encoded);
-                hash
-            }
-        };
-
-        let mut keys = Vec::with_capacity(self.cache.len());
-        let mut values = Vec::with_capacity(self.cache.len());
-        for (k, v) in self.cache.drain() {
-            keys.push(k.to_vec());
-            values.push(v);
-        }
-
-        self.db
-            .insert_batch(keys, values)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
-
-        let removed_keys: Vec<Vec<u8>> = self
-            .passing_keys
-            .iter()
-            .filter(|h| !self.gen_keys.contains(&h.to_vec()))
-            .map(|h| h.to_vec())
-            .collect();
-
-        self.db
-            .remove_batch(&removed_keys)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
-
-        self.root_hash = root_hash;
-        self.gen_keys.clear();
-        self.passing_keys.clear();
-        self.root = self
-            .recover_from_db(root_hash)?
-            .expect("The root that was just created is missing");
-        Ok(root_hash)
-    }
-
-    fn write_node(&mut self, to_encode: &Node) -> EncodedNode {
-        // Returns the hash value directly to avoid double counting.
-        if let Node::Hash(hash_node) = to_encode {
-            return EncodedNode::Hash(hash_node.hash);
-        }
-
-        let data = self.encode_raw(to_encode);
-        // Nodes smaller than 32 bytes are stored inside their parent,
-        // Nodes equal to 32 bytes are returned directly
-        if data.len() < HASHED_LENGTH {
-            EncodedNode::Inline(data)
-        } else {
-            let hash = keccak(&data);
-            self.cache.insert(hash.as_bytes().to_vec(), data);
-
-            self.gen_keys.insert(hash.as_bytes().to_vec());
-            EncodedNode::Hash(hash)
-        }
-    }
-
-    fn encode_raw(&mut self, node: &Node) -> Vec<u8> {
-        match node {
-            Node::Empty => rlp::NULL_RLP.to_vec(),
-            Node::Leaf(leaf) => {
-                let mut stream = RlpStream::new_list(2);
-                stream.append(&leaf.key.encode_compact());
-                stream.append(&leaf.value);
-                stream.out().to_vec()
-            }
-            Node::Branch(branch) => {
-                let borrow_branch = branch.read().unwrap();
-
-                let mut stream = RlpStream::new_list(17);
-                for i in 0..16 {
-                    let n = &borrow_branch.children[i];
-                    match self.write_node(n) {
-                        EncodedNode::Hash(hash) => stream.append(&hash.as_bytes()),
-                        EncodedNode::Inline(data) => stream.append_raw(&data, 1),
-                    };
-                }
-
-                match &borrow_branch.value {
-                    Some(v) => stream.append(v),
-                    None => stream.append_empty_data(),
-                };
-                stream.out().to_vec()
-            }
-            Node::Extension(ext) => {
-                let borrow_ext = ext.read().unwrap();
-
-                let mut stream = RlpStream::new_list(2);
-                stream.append(&borrow_ext.prefix.encode_compact());
-                match self.write_node(&borrow_ext.node) {
-                    EncodedNode::Hash(hash) => stream.append(&hash.as_bytes()),
-                    EncodedNode::Inline(data) => stream.append_raw(&data, 1),
-                };
-                stream.out().to_vec()
-            }
-            Node::Hash(_hash) => unreachable!(),
-        }
-    }
-
     fn decode_node(&self, data: &[u8]) -> TrieResult<Node> {
         let r = Rlp::new(data);
 
@@ -909,7 +373,7 @@ where
         }
     }
 
-    fn recover_from_db(&self, key: H256) -> TrieResult<Option<Node>> {
+    fn recover_from_db(&self, key: H256) -> TrieResult<Option<Node>> { // need
         let node = match self
             .db
             .get(key.as_bytes())
@@ -922,505 +386,49 @@ where
     }
 }
 
+
+
 #[cfg(test)]
 mod tests {
-    use rand::distributions::Alphanumeric;
-    use rand::seq::SliceRandom;
-    use rand::{thread_rng, Rng};
-    use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
-
-    use keccak_hash::{keccak, H256};
+    use sp_std::sync::Arc;
 
     use super::{EthTrie, Trie};
     use crate::db::{MemoryDB, DB};
-    use crate::errors::TrieError;
-    use crate::nibbles::Nibbles;
 
     #[test]
-    fn test_trie_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-        trie.insert(b"test", b"test").unwrap();
-    }
+    fn test_valid_proof() {
+        let proof: Vec<Vec<u8>> = vec![vec![249, 1, 49, 160, 86, 132, 220, 17, 195, 212, 250, 27, 162, 245, 193, 68, 171, 138, 4, 197, 211, 108, 97, 45, 194, 157, 207, 143, 193, 199, 208, 41, 147, 139, 231, 223, 160, 215, 136, 212, 98, 37, 236, 95, 218, 188, 213, 63, 95, 123, 137, 182, 52, 229, 192, 191, 81, 16, 148, 166, 122, 21, 166, 186, 162, 197, 54, 129, 73, 160, 50, 61, 111, 195, 180, 138, 33, 29, 62, 222, 98, 136, 183, 249, 241, 95, 111, 97, 30, 215, 197, 0, 200, 66, 107, 236, 236, 88, 81, 74, 152, 72, 160, 240, 200, 46, 88, 60, 244, 94, 149, 203, 81, 87, 100, 79, 230, 101, 204, 158, 202, 115, 116, 217, 102, 54, 34, 55, 244, 22, 202, 92, 237, 193, 212, 160, 156, 15, 220, 133, 51, 133, 228, 189, 31, 134, 61, 17, 122, 104, 120, 132, 236, 68, 20, 1, 213, 128, 72, 132, 252, 196, 32, 139, 212, 167, 50, 79, 160, 209, 146, 141, 170, 150, 201, 86, 84, 41, 125, 55, 3, 135, 58, 5, 247, 27, 225, 38, 116, 187, 125, 103, 118, 23, 112, 131, 59, 45, 161, 188, 97, 160, 180, 173, 188, 137, 53, 81, 30, 149, 196, 196, 4, 143, 152, 60, 119, 11, 49, 169, 24, 173, 2, 118, 118, 66, 168, 246, 4, 20, 98, 144, 225, 138, 160, 79, 217, 183, 86, 176, 10, 70, 190, 31, 172, 253, 22, 153, 29, 138, 91, 242, 125, 155, 105, 77, 26, 216, 85, 7, 134, 58, 141, 69, 45, 51, 92, 160, 157, 151, 129, 34, 116, 159, 78, 68, 243, 49, 126, 254, 215, 176, 0, 99, 211, 100, 141, 22, 150, 127, 211, 216, 211, 138, 49, 231, 99, 244, 107, 169, 128, 128, 128, 128, 128, 128, 128, 128], vec![249, 2, 17, 160, 169, 81, 88, 13, 54, 213, 36, 164, 205, 51, 0, 101, 154, 193, 218, 254, 198, 224, 154, 105, 87, 203, 161, 23, 112, 5, 157, 246, 7, 49, 193, 93, 160, 133, 13, 102, 21, 69, 215, 241, 0, 158, 202, 189, 174, 172, 36, 10, 137, 180, 82, 211, 245, 130, 153, 49, 143, 212, 243, 22, 168, 165, 187, 193, 220, 160, 131, 166, 197, 103, 203, 111, 14, 64, 124, 165, 5, 227, 95, 70, 233, 176, 77, 30, 29, 131, 161, 16, 197, 122, 146, 76, 171, 13, 26, 140, 205, 228, 160, 203, 109, 12, 210, 133, 166, 57, 99, 194, 74, 94, 95, 237, 122, 72, 247, 230, 165, 132, 26, 113, 64, 176, 53, 180, 199, 212, 47, 237, 168, 140, 219, 160, 31, 66, 131, 73, 181, 100, 76, 38, 4, 195, 124, 12, 7, 243, 91, 94, 152, 175, 164, 89, 240, 130, 149, 127, 218, 139, 0, 221, 196, 244, 237, 247, 160, 78, 204, 90, 149, 44, 133, 229, 155, 109, 187, 23, 118, 208, 176, 20, 185, 88, 196, 169, 114, 44, 2, 186, 115, 18, 248, 69, 24, 89, 169, 137, 148, 160, 207, 26, 157, 148, 70, 57, 67, 161, 127, 186, 121, 80, 213, 253, 167, 222, 118, 43, 173, 122, 56, 252, 118, 164, 215, 38, 112, 242, 41, 66, 15, 29, 160, 54, 150, 164, 0, 225, 196, 48, 222, 226, 52, 133, 116, 127, 71, 229, 189, 17, 217, 113, 36, 146, 181, 251, 126, 20, 63, 187, 80, 48, 218, 199, 63, 160, 50, 157, 25, 119, 100, 134, 44, 174, 163, 0, 90, 202, 139, 211, 239, 168, 133, 82, 31, 133, 101, 182, 143, 25, 169, 248, 253, 230, 127, 96, 182, 5, 160, 61, 169, 98, 179, 40, 153, 231, 71, 114, 43, 120, 162, 255, 149, 190, 41, 168, 234, 238, 111, 210, 22, 247, 182, 124, 132, 14, 150, 127, 58, 13, 18, 160, 119, 71, 196, 209, 133, 220, 174, 246, 89, 192, 253, 176, 22, 59, 185, 112, 113, 125, 175, 121, 26, 206, 48, 81, 68, 44, 63, 146, 109, 73, 112, 164, 160, 206, 223, 227, 3, 45, 177, 226, 148, 154, 166, 71, 116, 201, 199, 132, 92, 38, 133, 11, 69, 65, 150, 170, 34, 16, 141, 36, 137, 25, 44, 164, 123, 160, 15, 120, 235, 255, 255, 115, 146, 84, 91, 234, 225, 114, 190, 224, 8, 248, 163, 126, 157, 187, 32, 198, 200, 118, 176, 144, 70, 28, 249, 16, 107, 81, 160, 164, 247, 105, 92, 239, 108, 168, 83, 203, 62, 116, 141, 79, 38, 11, 154, 207, 0, 175, 39, 189, 120, 88, 188, 98, 167, 42, 186, 230, 56, 189, 146, 160, 61, 41, 103, 215, 203, 132, 145, 101, 137, 185, 203, 107, 193, 211, 233, 182, 2, 31, 135, 5, 205, 59, 208, 98, 187, 144, 33, 102, 170, 2, 150, 226, 160, 116, 35, 74, 208, 253, 204, 228, 200, 245, 180, 78, 104, 24, 146, 238, 169, 253, 11, 110, 138, 173, 250, 82, 210, 131, 153, 0, 92, 163, 62, 200, 107, 128], vec![249, 1, 174, 32, 185, 1, 170, 249, 1, 167, 1, 131, 185, 216, 98, 185, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 248, 157, 248, 155, 148, 4, 92, 67, 36, 3, 157, 169, 28, 82, 197, 93, 245, 215, 133, 56, 90, 171, 7, 61, 207, 248, 99, 160, 221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55, 141, 170, 149, 43, 167, 241, 99, 196, 161, 22, 40, 245, 90, 77, 245, 35, 179, 239, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 69, 34, 93, 53, 54, 172, 2, 146, 143, 22, 7, 26, 176, 80, 102, 188, 233, 92, 44, 213, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 122, 224, 66, 69, 43, 5, 132, 229, 17, 109, 14, 153, 33, 238, 211, 37, 21, 12, 22, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 214, 245, 95, 16, 52, 104, 0]];
+        let root: [u8; 32] = [95, 243, 132, 6, 46, 245, 218, 123, 33, 255, 248, 65, 145, 147, 32, 117, 221, 214, 158, 29, 90, 183, 176, 84, 27, 147, 118, 77, 20, 71, 55, 204];
+        let memdb = Arc::new(MemoryDB::new(true));    
+        let trie = EthTrie::new(Arc::clone(&memdb));
+        let res = trie.verify_proof(root.into(), &[111], proof).unwrap().unwrap();
+       
+        let expected: Vec<u8> = vec![249, 1, 167, 1, 131, 185, 216, 98, 185, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 248, 157, 248, 155, 148, 4, 92, 67, 36, 3, 157, 169, 28, 82, 197, 93, 245, 215, 133, 56, 90, 171, 7, 61, 207, 248, 99, 160, 221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55, 141, 170, 149, 43, 167, 241, 99, 196, 161, 22, 40, 245, 90, 77, 245, 35, 179, 239, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 69, 34, 93, 53, 54, 172, 2, 146, 143, 22, 7, 26, 176, 80, 102, 188, 233, 92, 44, 213, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 122, 224, 66, 69, 43, 5, 132, 229, 17, 109, 14, 153, 33, 238, 211, 37, 21, 12, 22, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 214, 245, 95, 16, 52, 104, 0];
 
-    #[test]
-    fn test_trie_get() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-        trie.insert(b"test", b"test").unwrap();
-        let v = trie.get(b"test").unwrap();
-
-        assert_eq!(Some(b"test".to_vec()), v)
+        assert_eq!(res, expected);
     }
 
     #[test]
-    fn test_trie_get_missing() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-        trie.insert(b"test", b"test").unwrap();
-        let v = trie.get(b"no-val").unwrap();
+    fn test_invalid_index_proof() {
+        let proof: Vec<Vec<u8>> = vec![vec![249, 1, 49, 160, 86, 132, 220, 17, 195, 212, 250, 27, 162, 245, 193, 68, 171, 138, 4, 197, 211, 108, 97, 45, 194, 157, 207, 143, 193, 199, 208, 41, 147, 139, 231, 223, 160, 215, 136, 212, 98, 37, 236, 95, 218, 188, 213, 63, 95, 123, 137, 182, 52, 229, 192, 191, 81, 16, 148, 166, 122, 21, 166, 186, 162, 197, 54, 129, 73, 160, 50, 61, 111, 195, 180, 138, 33, 29, 62, 222, 98, 136, 183, 249, 241, 95, 111, 97, 30, 215, 197, 0, 200, 66, 107, 236, 236, 88, 81, 74, 152, 72, 160, 240, 200, 46, 88, 60, 244, 94, 149, 203, 81, 87, 100, 79, 230, 101, 204, 158, 202, 115, 116, 217, 102, 54, 34, 55, 244, 22, 202, 92, 237, 193, 212, 160, 156, 15, 220, 133, 51, 133, 228, 189, 31, 134, 61, 17, 122, 104, 120, 132, 236, 68, 20, 1, 213, 128, 72, 132, 252, 196, 32, 139, 212, 167, 50, 79, 160, 209, 146, 141, 170, 150, 201, 86, 84, 41, 125, 55, 3, 135, 58, 5, 247, 27, 225, 38, 116, 187, 125, 103, 118, 23, 112, 131, 59, 45, 161, 188, 97, 160, 180, 173, 188, 137, 53, 81, 30, 149, 196, 196, 4, 143, 152, 60, 119, 11, 49, 169, 24, 173, 2, 118, 118, 66, 168, 246, 4, 20, 98, 144, 225, 138, 160, 79, 217, 183, 86, 176, 10, 70, 190, 31, 172, 253, 22, 153, 29, 138, 91, 242, 125, 155, 105, 77, 26, 216, 85, 7, 134, 58, 141, 69, 45, 51, 92, 160, 157, 151, 129, 34, 116, 159, 78, 68, 243, 49, 126, 254, 215, 176, 0, 99, 211, 100, 141, 22, 150, 127, 211, 216, 211, 138, 49, 231, 99, 244, 107, 169, 128, 128, 128, 128, 128, 128, 128, 128], vec![249, 2, 17, 160, 169, 81, 88, 13, 54, 213, 36, 164, 205, 51, 0, 101, 154, 193, 218, 254, 198, 224, 154, 105, 87, 203, 161, 23, 112, 5, 157, 246, 7, 49, 193, 93, 160, 133, 13, 102, 21, 69, 215, 241, 0, 158, 202, 189, 174, 172, 36, 10, 137, 180, 82, 211, 245, 130, 153, 49, 143, 212, 243, 22, 168, 165, 187, 193, 220, 160, 131, 166, 197, 103, 203, 111, 14, 64, 124, 165, 5, 227, 95, 70, 233, 176, 77, 30, 29, 131, 161, 16, 197, 122, 146, 76, 171, 13, 26, 140, 205, 228, 160, 203, 109, 12, 210, 133, 166, 57, 99, 194, 74, 94, 95, 237, 122, 72, 247, 230, 165, 132, 26, 113, 64, 176, 53, 180, 199, 212, 47, 237, 168, 140, 219, 160, 31, 66, 131, 73, 181, 100, 76, 38, 4, 195, 124, 12, 7, 243, 91, 94, 152, 175, 164, 89, 240, 130, 149, 127, 218, 139, 0, 221, 196, 244, 237, 247, 160, 78, 204, 90, 149, 44, 133, 229, 155, 109, 187, 23, 118, 208, 176, 20, 185, 88, 196, 169, 114, 44, 2, 186, 115, 18, 248, 69, 24, 89, 169, 137, 148, 160, 207, 26, 157, 148, 70, 57, 67, 161, 127, 186, 121, 80, 213, 253, 167, 222, 118, 43, 173, 122, 56, 252, 118, 164, 215, 38, 112, 242, 41, 66, 15, 29, 160, 54, 150, 164, 0, 225, 196, 48, 222, 226, 52, 133, 116, 127, 71, 229, 189, 17, 217, 113, 36, 146, 181, 251, 126, 20, 63, 187, 80, 48, 218, 199, 63, 160, 50, 157, 25, 119, 100, 134, 44, 174, 163, 0, 90, 202, 139, 211, 239, 168, 133, 82, 31, 133, 101, 182, 143, 25, 169, 248, 253, 230, 127, 96, 182, 5, 160, 61, 169, 98, 179, 40, 153, 231, 71, 114, 43, 120, 162, 255, 149, 190, 41, 168, 234, 238, 111, 210, 22, 247, 182, 124, 132, 14, 150, 127, 58, 13, 18, 160, 119, 71, 196, 209, 133, 220, 174, 246, 89, 192, 253, 176, 22, 59, 185, 112, 113, 125, 175, 121, 26, 206, 48, 81, 68, 44, 63, 146, 109, 73, 112, 164, 160, 206, 223, 227, 3, 45, 177, 226, 148, 154, 166, 71, 116, 201, 199, 132, 92, 38, 133, 11, 69, 65, 150, 170, 34, 16, 141, 36, 137, 25, 44, 164, 123, 160, 15, 120, 235, 255, 255, 115, 146, 84, 91, 234, 225, 114, 190, 224, 8, 248, 163, 126, 157, 187, 32, 198, 200, 118, 176, 144, 70, 28, 249, 16, 107, 81, 160, 164, 247, 105, 92, 239, 108, 168, 83, 203, 62, 116, 141, 79, 38, 11, 154, 207, 0, 175, 39, 189, 120, 88, 188, 98, 167, 42, 186, 230, 56, 189, 146, 160, 61, 41, 103, 215, 203, 132, 145, 101, 137, 185, 203, 107, 193, 211, 233, 182, 2, 31, 135, 5, 205, 59, 208, 98, 187, 144, 33, 102, 170, 2, 150, 226, 160, 116, 35, 74, 208, 253, 204, 228, 200, 245, 180, 78, 104, 24, 146, 238, 169, 253, 11, 110, 138, 173, 250, 82, 210, 131, 153, 0, 92, 163, 62, 200, 107, 128], vec![249, 1, 174, 32, 185, 1, 170, 249, 1, 167, 1, 131, 185, 216, 98, 185, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 248, 157, 248, 155, 148, 4, 92, 67, 36, 3, 157, 169, 28, 82, 197, 93, 245, 215, 133, 56, 90, 171, 7, 61, 207, 248, 99, 160, 221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55, 141, 170, 149, 43, 167, 241, 99, 196, 161, 22, 40, 245, 90, 77, 245, 35, 179, 239, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 69, 34, 93, 53, 54, 172, 2, 146, 143, 22, 7, 26, 176, 80, 102, 188, 233, 92, 44, 213, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 122, 224, 66, 69, 43, 5, 132, 229, 17, 109, 14, 153, 33, 238, 211, 37, 21, 12, 22, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 214, 245, 95, 16, 52, 104, 0]];
+        let root: [u8; 32] = [95, 243, 132, 6, 46, 245, 218, 123, 33, 255, 248, 65, 145, 147, 32, 117, 221, 214, 158, 29, 90, 183, 176, 84, 27, 147, 118, 77, 20, 71, 55, 204];
+        let memdb = Arc::new(MemoryDB::new(true));    
+        let trie = EthTrie::new(Arc::clone(&memdb));
+        let res = trie.verify_proof(root.into(), &[101], proof);
 
-        assert_eq!(None, v)
-    }
-
-    fn corrupt_trie() -> (EthTrie<MemoryDB>, H256, H256) {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let corruptor_db = memdb.clone();
-        let mut trie = EthTrie::new(memdb);
-        trie.insert(b"test1-key", b"really-long-value1-to-prevent-inlining")
-            .unwrap();
-        trie.insert(b"test2-key", b"really-long-value2-to-prevent-inlining")
-            .unwrap();
-        let actual_root_hash = trie.root_hash().unwrap();
-
-        // Manually corrupt the database by removing a trie node
-        // This is the hash for the leaf node for test2-key
-        let node_hash_to_delete = b"\xcb\x15v%j\r\x1e\te_TvQ\x8d\x93\x80\xd1\xa2\xd1\xde\xfb\xa5\xc3hJ\x8c\x9d\xb93I-\xbd";
-        assert_ne!(corruptor_db.get(node_hash_to_delete).unwrap(), None);
-        corruptor_db.remove(node_hash_to_delete).unwrap();
-        assert_eq!(corruptor_db.get(node_hash_to_delete).unwrap(), None);
-
-        (
-            trie,
-            actual_root_hash,
-            H256::from_slice(node_hash_to_delete),
-        )
+        assert!(res.is_err());
     }
 
     #[test]
-    /// When a database entry is missing, get returns a MissingTrieNode error
-    fn test_trie_get_corrupt() {
-        let (trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
+    fn test_invalid_proof() {
+        let proof: Vec<Vec<u8>> = vec![vec![248, 1, 49, 160, 86, 132, 220, 17, 195, 212, 250, 27, 162, 245, 193, 68, 171, 138, 4, 197, 211, 108, 97, 45, 194, 157, 207, 143, 193, 199, 208, 41, 147, 139, 231, 223, 160, 215, 136, 212, 98, 37, 236, 95, 218, 188, 213, 63, 95, 123, 137, 182, 52, 229, 192, 191, 81, 16, 148, 166, 122, 21, 166, 186, 162, 197, 54, 129, 73, 160, 50, 61, 111, 195, 180, 138, 33, 29, 62, 222, 98, 136, 183, 249, 241, 95, 111, 97, 30, 215, 197, 0, 200, 66, 107, 236, 236, 88, 81, 74, 152, 72, 160, 240, 200, 46, 88, 60, 244, 94, 149, 203, 81, 87, 100, 79, 230, 101, 204, 158, 202, 115, 116, 217, 102, 54, 34, 55, 244, 22, 202, 92, 237, 193, 212, 160, 156, 15, 220, 133, 51, 133, 228, 189, 31, 134, 61, 17, 122, 104, 120, 132, 236, 68, 20, 1, 213, 128, 72, 132, 252, 196, 32, 139, 212, 167, 50, 79, 160, 209, 146, 141, 170, 150, 201, 86, 84, 41, 125, 55, 3, 135, 58, 5, 247, 27, 225, 38, 116, 187, 125, 103, 118, 23, 112, 131, 59, 45, 161, 188, 97, 160, 180, 173, 188, 137, 53, 81, 30, 149, 196, 196, 4, 143, 152, 60, 119, 11, 49, 169, 24, 173, 2, 118, 118, 66, 168, 246, 4, 20, 98, 144, 225, 138, 160, 79, 217, 183, 86, 176, 10, 70, 190, 31, 172, 253, 22, 153, 29, 138, 91, 242, 125, 155, 105, 77, 26, 216, 85, 7, 134, 58, 141, 69, 45, 51, 92, 160, 157, 151, 129, 34, 116, 159, 78, 68, 243, 49, 126, 254, 215, 176, 0, 99, 211, 100, 141, 22, 150, 127, 211, 216, 211, 138, 49, 231, 99, 244, 107, 169, 128, 128, 128, 128, 128, 128, 128, 128], vec![249, 2, 17, 160, 169, 81, 88, 13, 54, 213, 36, 164, 205, 51, 0, 101, 154, 193, 218, 254, 198, 224, 154, 105, 87, 203, 161, 23, 112, 5, 157, 246, 7, 49, 193, 93, 160, 133, 13, 102, 21, 69, 215, 241, 0, 158, 202, 189, 174, 172, 36, 10, 137, 180, 82, 211, 245, 130, 153, 49, 143, 212, 243, 22, 168, 165, 187, 193, 220, 160, 131, 166, 197, 103, 203, 111, 14, 64, 124, 165, 5, 227, 95, 70, 233, 176, 77, 30, 29, 131, 161, 16, 197, 122, 146, 76, 171, 13, 26, 140, 205, 228, 160, 203, 109, 12, 210, 133, 166, 57, 99, 194, 74, 94, 95, 237, 122, 72, 247, 230, 165, 132, 26, 113, 64, 176, 53, 180, 199, 212, 47, 237, 168, 140, 219, 160, 31, 66, 131, 73, 181, 100, 76, 38, 4, 195, 124, 12, 7, 243, 91, 94, 152, 175, 164, 89, 240, 130, 149, 127, 218, 139, 0, 221, 196, 244, 237, 247, 160, 78, 204, 90, 149, 44, 133, 229, 155, 109, 187, 23, 118, 208, 176, 20, 185, 88, 196, 169, 114, 44, 2, 186, 115, 18, 248, 69, 24, 89, 169, 137, 148, 160, 207, 26, 157, 148, 70, 57, 67, 161, 127, 186, 121, 80, 213, 253, 167, 222, 118, 43, 173, 122, 56, 252, 118, 164, 215, 38, 112, 242, 41, 66, 15, 29, 160, 54, 150, 164, 0, 225, 196, 48, 222, 226, 52, 133, 116, 127, 71, 229, 189, 17, 217, 113, 36, 146, 181, 251, 126, 20, 63, 187, 80, 48, 218, 199, 63, 160, 50, 157, 25, 119, 100, 134, 44, 174, 163, 0, 90, 202, 139, 211, 239, 168, 133, 82, 31, 133, 101, 182, 143, 25, 169, 248, 253, 230, 127, 96, 182, 5, 160, 61, 169, 98, 179, 40, 153, 231, 71, 114, 43, 120, 162, 255, 149, 190, 41, 168, 234, 238, 111, 210, 22, 247, 182, 124, 132, 14, 150, 127, 58, 13, 18, 160, 119, 71, 196, 209, 133, 220, 174, 246, 89, 192, 253, 176, 22, 59, 185, 112, 113, 125, 175, 121, 26, 206, 48, 81, 68, 44, 63, 146, 109, 73, 112, 164, 160, 206, 223, 227, 3, 45, 177, 226, 148, 154, 166, 71, 116, 201, 199, 132, 92, 38, 133, 11, 69, 65, 150, 170, 34, 16, 141, 36, 137, 25, 44, 164, 123, 160, 15, 120, 235, 255, 255, 115, 146, 84, 91, 234, 225, 114, 190, 224, 8, 248, 163, 126, 157, 187, 32, 198, 200, 118, 176, 144, 70, 28, 249, 16, 107, 81, 160, 164, 247, 105, 92, 239, 108, 168, 83, 203, 62, 116, 141, 79, 38, 11, 154, 207, 0, 175, 39, 189, 120, 88, 188, 98, 167, 42, 186, 230, 56, 189, 146, 160, 61, 41, 103, 215, 203, 132, 145, 101, 137, 185, 203, 107, 193, 211, 233, 182, 2, 31, 135, 5, 205, 59, 208, 98, 187, 144, 33, 102, 170, 2, 150, 226, 160, 116, 35, 74, 208, 253, 204, 228, 200, 245, 180, 78, 104, 24, 146, 238, 169, 253, 11, 110, 138, 173, 250, 82, 210, 131, 153, 0, 92, 163, 62, 200, 107, 128], vec![249, 1, 174, 32, 185, 1, 170, 249, 1, 167, 1, 131, 185, 216, 98, 185, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 248, 157, 248, 155, 148, 4, 92, 67, 36, 3, 157, 169, 28, 82, 197, 93, 245, 215, 133, 56, 90, 171, 7, 61, 207, 248, 99, 160, 221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55, 141, 170, 149, 43, 167, 241, 99, 196, 161, 22, 40, 245, 90, 77, 245, 35, 179, 239, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 69, 34, 93, 53, 54, 172, 2, 146, 143, 22, 7, 26, 176, 80, 102, 188, 233, 92, 44, 213, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 122, 224, 66, 69, 43, 5, 132, 229, 17, 109, 14, 153, 33, 238, 211, 37, 21, 12, 22, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 214, 245, 95, 16, 52, 104, 0]];
+        let root: [u8; 32] = [95, 243, 132, 6, 46, 245, 218, 123, 33, 255, 248, 65, 145, 147, 32, 117, 221, 214, 158, 29, 90, 183, 176, 84, 27, 147, 118, 77, 20, 71, 55, 204];
+        let memdb = Arc::new(MemoryDB::new(true));    
+        let trie = EthTrie::new(Arc::clone(&memdb));
+        let res = trie.verify_proof(root.into(), &[111], proof);
 
-        let result = trie.get(b"test2-key");
-
-        if let Err(missing_trie_node) = result {
-            let expected_error = TrieError::MissingTrieNode {
-                node_hash: deleted_node_hash,
-                traversed: Some(Nibbles::from_hex(&[7, 4, 6, 5, 7, 3, 7, 4, 3, 2])),
-                root_hash: Some(actual_root_hash),
-                err_key: Some(b"test2-key".to_vec()),
-            };
-            assert_eq!(missing_trie_node, expected_error);
-        } else {
-            // The only acceptable result here was a MissingTrieNode
-            panic!(
-                "Must get a MissingTrieNode when database entry is missing, but got {:?}",
-                result
-            );
-        }
+        assert!(res.is_err());
     }
 
-    #[test]
-    /// When a database entry is missing, delete returns a MissingTrieNode error
-    fn test_trie_delete_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
 
-        let result = trie.remove(b"test2-key");
-
-        if let Err(missing_trie_node) = result {
-            let expected_error = TrieError::MissingTrieNode {
-                node_hash: deleted_node_hash,
-                traversed: Some(Nibbles::from_hex(&[7, 4, 6, 5, 7, 3, 7, 4, 3, 2])),
-                root_hash: Some(actual_root_hash),
-                err_key: Some(b"test2-key".to_vec()),
-            };
-            assert_eq!(missing_trie_node, expected_error);
-        } else {
-            // The only acceptable result here was a MissingTrieNode
-            panic!(
-                "Must get a MissingTrieNode when database entry is missing, but got {:?}",
-                result
-            );
-        }
-    }
-
-    #[test]
-    /// When a database entry is missing, delete returns a MissingTrieNode error
-    fn test_trie_delete_refactor_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
-
-        let result = trie.remove(b"test1-key");
-
-        if let Err(missing_trie_node) = result {
-            let expected_error = TrieError::MissingTrieNode {
-                node_hash: deleted_node_hash,
-                traversed: None,
-                root_hash: Some(actual_root_hash),
-                err_key: Some(b"test1-key".to_vec()),
-            };
-            assert_eq!(missing_trie_node, expected_error);
-        } else {
-            // The only acceptable result here was a MissingTrieNode
-            panic!(
-                "Must get a MissingTrieNode when database entry is missing, but got {:?}",
-                result
-            );
-        }
-    }
-
-    #[test]
-    /// When a database entry is missing, get_proof returns a MissingTrieNode error
-    fn test_trie_get_proof_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
-
-        let result = trie.get_proof(b"test2-key");
-
-        if let Err(missing_trie_node) = result {
-            let expected_error = TrieError::MissingTrieNode {
-                node_hash: deleted_node_hash,
-                traversed: None,
-                root_hash: Some(actual_root_hash),
-                err_key: Some(b"test2-key".to_vec()),
-            };
-            assert_eq!(missing_trie_node, expected_error);
-        } else {
-            // The only acceptable result here was a MissingTrieNode
-            panic!(
-                "Must get a MissingTrieNode when database entry is missing, but got {:?}",
-                result
-            );
-        }
-    }
-
-    #[test]
-    /// When a database entry is missing, insert returns a MissingTrieNode error
-    fn test_trie_insert_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
-
-        let result = trie.insert(b"test2-neighbor", b"any");
-
-        if let Err(missing_trie_node) = result {
-            let expected_error = TrieError::MissingTrieNode {
-                node_hash: deleted_node_hash,
-                traversed: Some(Nibbles::from_hex(&[7, 4, 6, 5, 7, 3, 7, 4, 3, 2])),
-                root_hash: Some(actual_root_hash),
-                err_key: Some(b"test2-neighbor".to_vec()),
-            };
-            assert_eq!(missing_trie_node, expected_error);
-        } else {
-            // The only acceptable result here was a MissingTrieNode
-            panic!(
-                "Must get a MissingTrieNode when database entry is missing, but got {:?}",
-                result
-            );
-        }
-    }
-
-    #[test]
-    fn test_trie_random_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-
-        for _ in 0..1000 {
-            let rand_str: String = thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(30)
-                .map(char::from)
-                .collect();
-            let val = rand_str.as_bytes();
-            trie.insert(val, val).unwrap();
-
-            let v = trie.get(val).unwrap();
-            assert_eq!(v.map(|v| v.to_vec()), Some(val.to_vec()));
-        }
-    }
-
-    #[test]
-    fn test_trie_contains() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-        trie.insert(b"test", b"test").unwrap();
-        assert!(trie.contains(b"test").unwrap());
-        assert!(!trie.contains(b"test2").unwrap());
-    }
-
-    #[test]
-    fn test_trie_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-        trie.insert(b"test", b"test").unwrap();
-        let removed = trie.remove(b"test").unwrap();
-        assert!(removed)
-    }
-
-    #[test]
-    fn test_trie_random_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-
-        for _ in 0..1000 {
-            let rand_str: String = thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(30)
-                .map(char::from)
-                .collect();
-            let val = rand_str.as_bytes();
-            trie.insert(val, val).unwrap();
-
-            let removed = trie.remove(val).unwrap();
-            assert!(removed);
-        }
-    }
-
-    #[test]
-    fn test_trie_at_root_six_keys() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let root = {
-            let mut trie = EthTrie::new(memdb.clone());
-            trie.insert(b"test", b"test").unwrap();
-            trie.insert(b"test1", b"test").unwrap();
-            trie.insert(b"test2", b"test").unwrap();
-            trie.insert(b"test23", b"test").unwrap();
-            trie.insert(b"test33", b"test").unwrap();
-            trie.insert(b"test44", b"test").unwrap();
-            trie.root_hash().unwrap()
-        };
-
-        let mut trie = EthTrie::new(memdb).at_root(root);
-        let v1 = trie.get(b"test33").unwrap();
-        assert_eq!(Some(b"test".to_vec()), v1);
-        let v2 = trie.get(b"test44").unwrap();
-        assert_eq!(Some(b"test".to_vec()), v2);
-        let root2 = trie.root_hash().unwrap();
-        assert_eq!(hex::encode(root), hex::encode(root2));
-    }
-
-    #[test]
-    fn test_trie_at_root_and_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let root = {
-            let mut trie = EthTrie::new(Arc::clone(&memdb));
-            trie.insert(b"test", b"test").unwrap();
-            trie.insert(b"test1", b"test").unwrap();
-            trie.insert(b"test2", b"test").unwrap();
-            trie.insert(b"test23", b"test").unwrap();
-            trie.insert(b"test33", b"test").unwrap();
-            trie.insert(b"test44", b"test").unwrap();
-            trie.root_hash().unwrap()
-        };
-
-        let mut trie = EthTrie::new(memdb).at_root(root);
-        trie.insert(b"test55", b"test55").unwrap();
-        trie.root_hash().unwrap();
-        let v = trie.get(b"test55").unwrap();
-        assert_eq!(Some(b"test55".to_vec()), v);
-    }
-
-    #[test]
-    fn test_trie_at_root_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let root = {
-            let mut trie = EthTrie::new(Arc::clone(&memdb));
-            trie.insert(b"test", b"test").unwrap();
-            trie.insert(b"test1", b"test").unwrap();
-            trie.insert(b"test2", b"test").unwrap();
-            trie.insert(b"test23", b"test").unwrap();
-            trie.insert(b"test33", b"test").unwrap();
-            trie.insert(b"test44", b"test").unwrap();
-            trie.root_hash().unwrap()
-        };
-
-        let mut trie = EthTrie::new(memdb).at_root(root);
-        let removed = trie.remove(b"test44").unwrap();
-        assert!(removed);
-        let removed = trie.remove(b"test33").unwrap();
-        assert!(removed);
-        let removed = trie.remove(b"test23").unwrap();
-        assert!(removed);
-    }
-
-    #[test]
-    fn test_multiple_trie_roots() {
-        let k0: ethereum_types::H256 = ethereum_types::H256::zero();
-        let k1: ethereum_types::H256 = ethereum_types::H256::random();
-        let v: ethereum_types::H256 = ethereum_types::H256::random();
-
-        let root1 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie = EthTrie::new(memdb);
-            trie.insert(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie.root_hash().unwrap()
-        };
-
-        let root2 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie = EthTrie::new(memdb);
-            trie.insert(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie.insert(k1.as_bytes(), v.as_bytes()).unwrap();
-            trie.root_hash().unwrap();
-            trie.remove(k1.as_ref()).unwrap();
-            trie.root_hash().unwrap()
-        };
-
-        let root3 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie1 = EthTrie::new(Arc::clone(&memdb));
-            trie1.insert(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie1.insert(k1.as_bytes(), v.as_bytes()).unwrap();
-            trie1.root_hash().unwrap();
-            let root = trie1.root_hash().unwrap();
-            let mut trie2 = trie1.at_root(root);
-            trie2.remove(k1.as_bytes()).unwrap();
-            trie2.root_hash().unwrap()
-        };
-
-        assert_eq!(root1, root2);
-        assert_eq!(root2, root3);
-    }
-
-    #[test]
-    fn test_delete_stale_keys_with_random_insert_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-
-        let mut rng = rand::thread_rng();
-        let mut keys = vec![];
-        for _ in 0..100 {
-            let random_bytes: Vec<u8> = (0..rng.gen_range(2..30))
-                .map(|_| rand::random::<u8>())
-                .collect();
-            trie.insert(&random_bytes, &random_bytes).unwrap();
-            keys.push(random_bytes.clone());
-        }
-        trie.root_hash().unwrap();
-        let slice = &mut keys;
-        slice.shuffle(&mut rng);
-
-        for key in slice.iter() {
-            trie.remove(key).unwrap();
-        }
-        trie.root_hash().unwrap();
-
-        let empty_node_key = keccak(&rlp::NULL_RLP);
-        let value = trie.db.get(empty_node_key.as_ref()).unwrap().unwrap();
-        assert_eq!(value, &rlp::NULL_RLP)
-    }
-
-    #[test]
-    fn insert_full_branch() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-
-        trie.insert(b"test", b"test").unwrap();
-        trie.insert(b"test1", b"test").unwrap();
-        trie.insert(b"test2", b"test").unwrap();
-        trie.insert(b"test23", b"test").unwrap();
-        trie.insert(b"test33", b"test").unwrap();
-        trie.insert(b"test44", b"test").unwrap();
-        trie.root_hash().unwrap();
-
-        let v = trie.get(b"test").unwrap();
-        assert_eq!(Some(b"test".to_vec()), v);
-    }
-
-    #[test]
-    fn iterator_trie() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let root1: H256;
-        let mut kv = HashMap::new();
-        kv.insert(b"test".to_vec(), b"test".to_vec());
-        kv.insert(b"test1".to_vec(), b"test1".to_vec());
-        kv.insert(b"test11".to_vec(), b"test2".to_vec());
-        kv.insert(b"test14".to_vec(), b"test3".to_vec());
-        kv.insert(b"test16".to_vec(), b"test4".to_vec());
-        kv.insert(b"test18".to_vec(), b"test5".to_vec());
-        kv.insert(b"test2".to_vec(), b"test6".to_vec());
-        kv.insert(b"test23".to_vec(), b"test7".to_vec());
-        kv.insert(b"test9".to_vec(), b"test8".to_vec());
-        {
-            let mut trie = EthTrie::new(memdb.clone());
-            let mut kv = kv.clone();
-            kv.iter().for_each(|(k, v)| {
-                trie.insert(k, v).unwrap();
-            });
-            root1 = trie.root_hash().unwrap();
-
-            trie.iter()
-                .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
-            assert!(kv.is_empty());
-        }
-
-        {
-            let mut trie = EthTrie::new(memdb.clone());
-            let mut kv2 = HashMap::new();
-            kv2.insert(b"test".to_vec(), b"test11".to_vec());
-            kv2.insert(b"test1".to_vec(), b"test12".to_vec());
-            kv2.insert(b"test14".to_vec(), b"test13".to_vec());
-            kv2.insert(b"test22".to_vec(), b"test14".to_vec());
-            kv2.insert(b"test9".to_vec(), b"test15".to_vec());
-            kv2.insert(b"test16".to_vec(), b"test16".to_vec());
-            kv2.insert(b"test2".to_vec(), b"test17".to_vec());
-            kv2.iter().for_each(|(k, v)| {
-                trie.insert(k, v).unwrap();
-            });
-
-            trie.root_hash().unwrap();
-
-            let mut kv_delete = HashSet::new();
-            kv_delete.insert(b"test".to_vec());
-            kv_delete.insert(b"test1".to_vec());
-            kv_delete.insert(b"test14".to_vec());
-
-            kv_delete.iter().for_each(|k| {
-                trie.remove(k).unwrap();
-            });
-
-            kv2.retain(|k, _| !kv_delete.contains(k));
-
-            trie.root_hash().unwrap();
-            trie.iter()
-                .for_each(|(k, v)| assert_eq!(kv2.remove(&k).unwrap(), v));
-            assert!(kv2.is_empty());
-        }
-
-        let trie = EthTrie::new(memdb).at_root(root1);
-        trie.iter()
-            .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
-        assert!(kv.is_empty());
-    }
-
-    #[test]
-    fn test_small_trie_at_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb.clone());
-        trie.insert(b"key", b"val").unwrap();
-        let new_root_hash = trie.commit().unwrap();
-
-        let empty_trie = EthTrie::new(memdb);
-        // Can't find key in new trie at empty root
-        assert_eq!(empty_trie.get(b"key").unwrap(), None);
-
-        let trie_view = empty_trie.at_root(new_root_hash);
-        assert_eq!(&trie_view.get(b"key").unwrap().unwrap(), b"val");
-
-        // Previous trie was not modified
-        assert_eq!(empty_trie.get(b"key").unwrap(), None);
-    }
-
-    #[test]
-    fn test_large_trie_at_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb.clone());
-        trie.insert(
-            b"pretty-long-key",
-            b"even-longer-val-to-go-more-than-32-bytes",
-        )
-        .unwrap();
-        let new_root_hash = trie.commit().unwrap();
-
-        let empty_trie = EthTrie::new(memdb);
-        // Can't find key in new trie at empty root
-        assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
-
-        let trie_view = empty_trie.at_root(new_root_hash);
-        assert_eq!(
-            &trie_view.get(b"pretty-long-key").unwrap().unwrap(),
-            b"even-longer-val-to-go-more-than-32-bytes"
-        );
-
-        // Previous trie was not modified
-        assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
-    }
 }

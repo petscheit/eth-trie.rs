@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use sp_std::sync::{Arc, RwLock};
 
 use keccak_hash::H256;
 
