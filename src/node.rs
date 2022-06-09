@@ -1,5 +1,5 @@
 use sp_std::sync::{Arc, RwLock};
-
+use sp_std::vec::Vec;
 use keccak_hash::H256;
 
 use crate::nibbles::Nibbles;
@@ -47,20 +47,20 @@ pub struct BranchNode {
     pub value: Option<Vec<u8>>,
 }
 
-impl BranchNode {
-    pub fn insert(&mut self, i: usize, n: Node) {
-        if i == 16 {
-            match n {
-                Node::Leaf(leaf) => {
-                    self.value = Some(leaf.value.clone());
-                }
-                _ => panic!("The n must be leaf node"),
-            }
-        } else {
-            self.children[i] = n
-        }
-    }
-}
+// impl BranchNode {
+//     pub fn insert(&mut self, i: usize, n: Node) {
+//         if i == 16 {
+//             match n {
+//                 Node::Leaf(leaf) => {
+//                     self.value = Some(leaf.value.clone());
+//                 }
+//                 _ => panic!("The n must be leaf node"),
+//             }
+//         } else {
+//             self.children[i] = n
+//         }
+//     }
+// }
 
 #[derive(Debug)]
 pub struct ExtensionNode {

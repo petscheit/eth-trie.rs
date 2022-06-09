@@ -1,7 +1,6 @@
+use sp_std::vec::Vec;
 use hashbrown::{HashMap};
-use std::error::Error;
 use sp_std::sync::Arc;
-
 use parking_lot::RwLock;
 
 // use crate::errors::MemDBError;
@@ -23,14 +22,12 @@ pub trait DB: Send + Sync {
 #[derive(Default, Debug)]
 pub struct MemoryDB {
     // If "light" is true, the data is deleted from the database at the time of submission.
-    light: bool,
     storage: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
 }
 
 impl MemoryDB {
-    pub fn new(light: bool) -> Self {
+    pub fn new() -> Self {
         MemoryDB {
-            light,
             storage: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -59,7 +56,7 @@ mod tests {
 
     #[test]
     fn test_memdb_get() {
-        let memdb = MemoryDB::new(true);
+        let memdb = MemoryDB::new();
         memdb.insert(b"test-key", b"test-value".to_vec()).unwrap();
         let v = memdb.get(b"test-key").unwrap().unwrap();
 
