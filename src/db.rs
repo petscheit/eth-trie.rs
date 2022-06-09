@@ -4,18 +4,20 @@ use sp_std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::errors::MemDBError;
+// use crate::errors::MemDBError;
+
+// use anyho
 
 /// "DB" defines the "trait" of trie and database interaction.
 /// You should first write the data to the cache and write the data
 /// to the database in bulk after the end of a set of operations.
 pub trait DB: Send + Sync {
-    type Error: Error;
+    // type Error: Error;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>; // need
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, &'static str>; // need
 
     /// Insert data into the cache.
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error>; // need
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), &'static str>; // need
 }
 
 #[derive(Default, Debug)]
@@ -35,9 +37,9 @@ impl MemoryDB {
 }
 
 impl DB for MemoryDB {
-    type Error = MemDBError;
+    // type Error = MemDBError;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
         if let Some(value) = self.storage.read().get(key) {
             Ok(Some(value.clone()))
         } else {
@@ -45,7 +47,7 @@ impl DB for MemoryDB {
         }
     }
 
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error> {
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), &'static str> {
         self.storage.write().insert(key.to_vec(), value);
         Ok(())
     }
