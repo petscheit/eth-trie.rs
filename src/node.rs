@@ -1,4 +1,4 @@
-use sp_std::sync::{Arc, RwLock};
+use sp_std::sync::{Arc,};
 use sp_std::vec::Vec;
 use keccak_hash::H256;
 
@@ -8,8 +8,9 @@ use crate::nibbles::Nibbles;
 pub enum Node {
     Empty,
     Leaf(Arc<LeafNode>),
-    Extension(Arc<RwLock<ExtensionNode>>),
-    Branch(Arc<RwLock<BranchNode>>),
+    Extension(Arc<ExtensionNode>),
+    Branch(Arc<BranchNode>
+),
     Hash(Arc<HashNode>),
 }
 
@@ -20,12 +21,12 @@ impl Node {
     }
 
     pub fn from_branch(children: [Node; 16], value: Option<Vec<u8>>) -> Self {
-        let branch = Arc::new(RwLock::new(BranchNode { children, value }));
+        let branch = Arc::new(BranchNode { children, value });
         Node::Branch(branch)
     }
 
     pub fn from_extension(prefix: Nibbles, node: Node) -> Self {
-        let ext = Arc::new(RwLock::new(ExtensionNode { prefix, node }));
+        let ext = Arc::new(ExtensionNode { prefix, node });
         Node::Extension(ext)
     }
 
